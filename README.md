@@ -1,6 +1,6 @@
 # Location History Plot
 
-A pure client-side location history parser/visualizer in Dart.
+A pure client-side location history parser/visualizer in Dart. [Try it out.](http://erikreed.github.io/location-history-plot/)
 
 ## Steps:
 * Fetch json location history via Google Takeout
