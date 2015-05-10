@@ -1,0 +1,8 @@
+name: location-history-plot
+version: 0.1.0
+description: Visualize location history on Google Maps
+environment:
+  sdk: '>=1.0.0 <2.0.0'
+dependencies:
+  browser: '>=0.10.0 <0.11.0'
+  google_maps: any
