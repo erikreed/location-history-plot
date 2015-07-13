@@ -2,16 +2,19 @@
 // is governed by a MIT-style license that can be found in the LICENSE file.
 
 import 'dart:html';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as Math;
 import 'package:google_maps/google_maps.dart' as gm;
 
-class DndFiles {
+const int MAX_ERROR = 10000;  // max error accuracy distance
+
+class FileDrop {
   FormElement _readForm;
   InputElement _fileInput;
   Element _dropZone;
 
-  DndFiles() {
+  FileDrop() {
     _readForm = document.querySelector('#read');
     _fileInput = document.querySelector('#files');
     _fileInput.onChange.listen((e) => _onFileInputChange());
@@ -54,11 +57,13 @@ class DndFiles {
         var result = JSON.decode(reader.result);
         List locations = result['locations'];
 
-        var coords = locations.map((l) {
-          return new Coordinate(
-              l['latitudeE7'] / 1e7, l['longitudeE7'] / 1e7, int.parse(l['timestampMs']));
+        var coords = locations
+            .where((l) => l['accuracy'] != null && l['accuracy'] <= MAX_ERROR)
+            .map((l) {
+              return new Coordinate(
+                  l['latitudeE7'] / 1e7, l['longitudeE7'] / 1e7, int.parse(l['timestampMs']));
         }).toList();
-        print(coords.first);
+        print('Filtered ${locations.length - coords.length} coordinates due to accuracy cap of $MAX_ERROR');
         cm.addCoords(coords);
         print("Read ${coords.length} coordinates.");
       });
@@ -66,7 +71,6 @@ class DndFiles {
 
       reader.onLoadEnd.forEach((e) {
         if (++i != files.length) {
-          print('ASDASDASD: $i');
           return; // TODO: this is silly
         }
         var uniqueLocs = cm.uniqueLocs();
@@ -84,8 +88,21 @@ class DndFiles {
         var line = new gm.Polyline(path);
         line.map = map;
 
+        Set<String> countries = new Set<String>();
         uniqueLocs.forEach((c) {
-          new gm.Marker(new gm.MarkerOptions()..position = new gm.LatLng(c.lat, c.long))..map = map;
+          new gm.Marker(new gm.MarkerOptions()..position = c.toGmLatLong())..map = map;
+          c.reverseGeocode().then((List<Map> o) {
+            if (o == null) {
+              return;
+            }
+            var match = o.firstWhere((Map m) {
+              List<String> types = m['types'];
+              return types.contains('country');
+            });
+
+            countries.add(match['name']);
+            print("Country count ${countries.length}: $countries");
+          });
         });
       });
     }
@@ -163,8 +180,46 @@ class Coordinate implements Comparable {
   static num deg2rad(deg) {
     return deg * (Math.PI / 180);
   }
+
+  gm.LatLng toGmLatLong() {
+    return new gm.LatLng(lat, long);
+  }
+
+  Future<Object> reverseGeocode() {
+    var completer = new Completer();
+    Storage localStorage = window.localStorage;
+    localStorage.clear();
+    String key = "$lat,$long";
+
+    var existing = localStorage[key];
+    if (existing != null) {
+      existing = JSON.decode(existing);
+      completer.complete(existing);
+    } else {
+      gm.GeocoderRequest request = new gm.GeocoderRequest();
+      request.location = toGmLatLong();
+
+      gm.Geocoder geocoder = new gm.Geocoder();
+      geocoder.geocode(request, (List<gm.GeocoderResult> results, gm.GeocoderStatus status) {
+        if (status.$unsafe.contains("OK")) {
+          var jsObjects = results.map((r) {
+            var out = {};
+            out['types'] = r.$unsafe['types'];
+            out['name'] = r.$unsafe['formatted_address'];
+            return out;
+          }).toList();
+          localStorage[key] = JSON.encode(jsObjects);
+          completer.complete(jsObjects);
+        } else {
+          print('Error looking up $this: ${status.$unsafe}');
+          completer.complete(null);
+        }
+      });
+    }
+    return completer.future;
+  }
 }
 
 void main() {
-  new DndFiles();
+  new FileDrop();
 }
